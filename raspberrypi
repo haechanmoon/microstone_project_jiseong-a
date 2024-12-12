@@ -1,0 +1,54 @@
+import cv2
+import torch
+import numpy as np
+import socket
+
+print("start loading...")
+model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
+print("done")
+
+cap = cv2.VideoCapture(0)
+
+# 소켓 설정
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server_address = ('라즈베리파이IP', 10000)
+sock.bind(server_address)
+sock.listen(1)
+
+print('연결을 기다리는 중...')
+connection, client_address = sock.accept()
+print('연결됨:', client_address)
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        print("프레임을 읽을 수 없습니다.")
+        break
+
+    results = model(frame[..., ::-1])  # BGR to RGB
+    print(f"detect: {len(results.xyxy[0])}")
+
+    for *xyxy, conf, cls in results.xyxy[0]:
+        if int(cls) == 0 and conf > 0.3:  #신뢰도가 0.3 이상인 경우
+            x1, y1, x2, y2 = map(int, xyxy)
+            
+            h = y2 - y1
+            w = x2 - x1
+            aspect_ratio = h / w
+            if aspect_ratio < 1.5:
+                print("falling: 1") #낙상 감지일 경우
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+                connection.sendall(b'1')
+            else:
+                print("standing: 0") #일반적인 경우
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                connection.sendall(b'0')
+
+    cv2.imshow('Frame', frame)
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
+connection.close()
+sock.close()
